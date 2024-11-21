@@ -1,0 +1,7 @@
+.DS_Store
+.cache
+build
+.Rproj.user
+upload.txt
+.gitignore
+valgrind_drd
