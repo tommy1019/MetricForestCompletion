@@ -1,3 +1,4 @@
+#include "lib/args.h"
 #include "lib/test_runner.h"
 #include "lib/vec.h"
 
@@ -6,11 +7,17 @@
 
 // Gaussian synthetic data test
 
-bool CLUSTER_DETECTION_TEST = false;
+struct {
+    std::string input_file;
+    std::string output_file;
+    std::string all_output_file;
+    bool cluster_test = false;
+    int dim;
+} args;
 
 // Templated function to run tests on the given dimension D
 template <size_t D>
-void test_dim(std::string out, std::string all_out) {
+void test_dim() {
     using Vec = Vec<float, D>;
 
     // Euclidean distance
@@ -46,16 +53,16 @@ void test_dim(std::string out, std::string all_out) {
     };
 
     // Generates a clustering evaluator for a given amount of clusters
-    auto fixed_cluster = [](size_t clusters) -> std::pair<std::string, std::function<std::tuple<Clustering, MetricForestCompletion>(std::vector<Vec>, size_t num_gauss, size_t points_per_gauss)>> {
-        return {"C" + std::to_string(clusters), [clusters](std::vector<Vec> points, size_t num_gauss, size_t points_per_gauss) {
+    auto fixed_cluster = [](size_t clusters) -> std::pair<std::string, EvaluatorType<Vec, size_t, size_t>> {
+        return {"C" + std::to_string(clusters), [clusters](std::vector<Vec> points, size_t num_gauss, size_t points_per_gauss) -> EvaluatorReturnType {
                     auto clustering = k_centering(points, clusters, dist_func);
                     auto mfc = metric_forest_completion(points, clusters, clustering.assignments, dist_func);
-                    return std::tuple{clustering, mfc};
+                    co_yield std::make_pair("normal", std::tuple{clustering, mfc});
                 }};
     };
 
     // List of evaluators to run
-    std::vector<std::pair<std::string, std::function<std::tuple<Clustering, MetricForestCompletion>(std::vector<Vec>, size_t num_gauss, size_t points_per_gauss)>>> evaluators = {{
+    std::vector<std::pair<std::string, EvaluatorType<Vec, size_t, size_t>>> evaluators = {{
         fixed_cluster(16),
         fixed_cluster(32),
         fixed_cluster(64),
@@ -63,7 +70,7 @@ void test_dim(std::string out, std::string all_out) {
         fixed_cluster(256),
     }};
 
-    if (CLUSTER_DETECTION_TEST) {
+    if (args.cluster_test) {
         // Replace the set evaluators with a list of every cluster amount from 2 to 150
         evaluators.clear();
         for (int i = 2; i < 150; i++) {
@@ -71,11 +78,13 @@ void test_dim(std::string out, std::string all_out) {
         }
 
         // Create and run a test runner
-        auto test_runner = MUST(CreateTestRunner<Vec, true, size_t, size_t>(out, all_out, std::array<std::string, 2>{"GaussCount", "PointsPerGauss"}, dist_func, gen_dataset, evaluators));
+        auto test_runner
+            = MUST(CreateTestRunner<Vec, true, size_t, size_t>(args.output_file, args.all_output_file, std::array<std::string, 2>{"GaussCount", "PointsPerGauss"}, dist_func, gen_dataset, evaluators));
         MUST(test_runner.run_test(32, 100, 200));
     } else {
         // Create and run a test runner
-        auto test_runner = MUST(CreateTestRunner<Vec, true, size_t, size_t>(out, all_out, std::array<std::string, 2>{"GaussCount", "PointsPerGauss"}, dist_func, gen_dataset, evaluators));
+        auto test_runner
+            = MUST(CreateTestRunner<Vec, true, size_t, size_t>(args.output_file, args.all_output_file, std::array<std::string, 2>{"GaussCount", "PointsPerGauss"}, dist_func, gen_dataset, evaluators));
 
         size_t N = 20000;
 
@@ -88,23 +97,18 @@ void test_dim(std::string out, std::string all_out) {
 }
 
 int main(int argc, char** argv) {
-    if (argc != 4 && argc != 5) {
-        std::print("Usage: {} [dim_count] [out] [all_out]\n", argv[0]);
-        exit(1);
-    }
 
-    if (argc == 5 && std::string(argv[4]) == "cluster_test") {
-        CLUSTER_DETECTION_TEST = true;
-    }
-
-    size_t d = std::stoi(argv[1]);
+    REQUIRE(parse_arg(argc, argv, "dimension", args.dim, 'd'), "");
+    REQUIRE(parse_arg(argc, argv, "output_file", args.output_file, 'o'), "");
+    REQUIRE(parse_arg(argc, argv, "all_output_file", args.all_output_file, 'a'), "");
+    REQUIRE(parse_arg(argc, argv, "cluster_test", args.cluster_test, 'c', false), "");
 
 #define DIM(D)                                                                                                                                                                                         \
     case D:                                                                                                                                                                                            \
-        test_dim<D>(argv[2], argv[3]);                                                                                                                                                                 \
+        test_dim<D>();                                                                                                                                                                                 \
         break;
 
-    switch (d) {
+    switch (args.dim) {
         DIM(2);
         DIM(4);
         DIM(8);
@@ -114,5 +118,7 @@ int main(int argc, char** argv) {
         DIM(128);
         DIM(256);
         DIM(512);
+    default:
+        REQUIRE_NOT_REACHED("UNKNOWN DIMENSION: %d", args.dim)
     }
 }

@@ -1,15 +1,26 @@
+#include <cfloat>
+
+#include "lib/args.h"
 #include "lib/test_runner.h"
 #include "lib/vec.h"
 
 #include "algo/k_centering.h"
 
+#include "common.h"
+
 // Uniform synthetic data test
 
-bool CLUSTER_DETECTION_TEST = false;
+struct {
+    std::string input_file;
+    std::string output_file;
+    std::string all_output_file;
+    bool cluster_test = false;
+    int dim;
+} args;
 
 // Templated function to run tests on the given dimension D
 template <size_t D>
-void test_dim(std::string out, std::string all_out) {
+void test_dim() {
     using Vec = Vec<float, D>;
 
     // Euclidean distance
@@ -30,62 +41,22 @@ void test_dim(std::string out, std::string all_out) {
         return points;
     };
 
-    // Generates a clustering evaluator for a given amount of clusters
-    auto fixed_cluster = [](size_t clusters) -> std::pair<std::string, std::function<std::tuple<Clustering, MetricForestCompletion>(std::vector<Vec>, size_t N)>> {
-        return {"C" + std::to_string(clusters), [clusters](std::vector<Vec> points, size_t N) {
-                    auto clustering = k_centering(points, clusters, dist_func);
-                    auto mfc = metric_forest_completion(points, clusters, clustering.assignments, dist_func);
-                    return std::tuple{clustering, mfc};
-                }};
-    };
-
-    // List of evaluators to run
-    std::vector<std::pair<std::string, std::function<std::tuple<Clustering, MetricForestCompletion>(std::vector<Vec>, size_t N)>>> evaluators = {{
-        fixed_cluster(16),
-        fixed_cluster(32),
-        fixed_cluster(64),
-        fixed_cluster(128),
-        fixed_cluster(256),
-    }};
-
-    if (CLUSTER_DETECTION_TEST) {
-        // Replace the set evaluators with a list of every cluster amount from 2 to 150
-        evaluators.clear();
-        for (int i = 2; i < 150; i++) {
-            evaluators.push_back(fixed_cluster(i));
-        }
-
-        // Create and run a test runner
-        auto test_runner = MUST(CreateTestRunner<Vec, true, size_t>(out, all_out, std::array<std::string, 1>{"N"}, dist_func, gen_dataset, evaluators));
-        MUST(test_runner.run_test(32, 20000));
-    } else {
-        // Create and run a test runner
-        auto test_runner = MUST(CreateTestRunner<Vec, true, size_t>(out, all_out, std::array<std::string, 1>{"N"}, dist_func, gen_dataset, evaluators));
-        for (int i = 500; i <= 30000; i += 100) {
-            std::print("Running tests for N={}\n", i);
-            MUST(test_runner.run_test(16, i));
-        }
-    }
+    // Run standard set of evalulators
+    run_standard_evalulators<Vec>(args.output_file, args.all_output_file, args.cluster_test, gen_dataset, dist_func);
 }
 
 int main(int argc, char** argv) {
-    if (argc != 4 && argc != 5) {
-        std::print("Usage: {} [dim_count] [out] [all_out]\n", argv[0]);
-        exit(1);
-    }
-
-    if (argc == 5 && std::string(argv[4]) == "cluster_test") {
-        CLUSTER_DETECTION_TEST = true;
-    }
-
-    size_t d = std::stoi(argv[1]);
+    REQUIRE(parse_arg(argc, argv, "dimension", args.dim, 'd'), "");
+    REQUIRE(parse_arg(argc, argv, "output_file", args.output_file, 'o'), "");
+    REQUIRE(parse_arg(argc, argv, "all_output_file", args.all_output_file, 'a'), "");
+    REQUIRE(parse_arg(argc, argv, "cluster_test", args.cluster_test, 'c', false), "");
 
 #define DIM(D)                                                                                                                                                                                         \
     case D:                                                                                                                                                                                            \
-        test_dim<D>(argv[2], argv[3]);                                                                                                                                                                 \
+        test_dim<D>();                                                                                                                                                                                 \
         break;
 
-    switch (d) {
+    switch (args.dim) {
         DIM(2);
         DIM(4);
         DIM(8);
@@ -95,5 +66,7 @@ int main(int argc, char** argv) {
         DIM(128);
         DIM(256);
         DIM(512);
+    default:
+        REQUIRE_NOT_REACHED("UNKNOWN DIMENSION: %d", args.dim)
     }
 }

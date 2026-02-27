@@ -1,7 +1,8 @@
 #pragma once
 
 #include <array>
-#include <sstream>
+#include <cmath>
+#include <print>
 
 // General purpose n dimensional templated vector type
 
